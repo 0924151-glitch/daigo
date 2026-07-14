@@ -233,6 +233,11 @@ if os.path.isdir(WEB_DIR):
         full = os.path.join(WEB_DIR, path)
         if path and os.path.isfile(full):
             return FileResponse(full)
+        # directory index (e.g. /game -> game/index.html)
+        if path and os.path.isdir(full):
+            idx = os.path.join(full, "index.html")
+            if os.path.isfile(idx):
+                return FileResponse(idx)
         return FileResponse(os.path.join(WEB_DIR, "index.html"))
 
 
