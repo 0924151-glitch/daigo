@@ -1,5 +1,6 @@
 /* main.js - game orchestration: net events -> state, render loop,
- * entity interpolation, camera follow, input -> server. */
+ * entity interpolation, camera follow, input -> server.
+ * Integrates: World3D, Characters, Effects, Sound, SkillCheck, Hud. */
 'use strict';
 
 (() => {
@@ -13,13 +14,22 @@
   let prevState = null, curState = null, stateAt = 0;
   const SNAP_MS = 100;      // server snapshot interval (10/s)
 
-  // three.js entity registry: id -> { obj, lastX, lastZ, moving }
+  // three.js entity registry: id -> { obj, label, moving }
   const survivorObjs = new Map();
   let hunterObj = null;
 
   const canvas = document.getElementById('gl');
   World3D.init(canvas);
+  Effects.init(World3D.scene);
   Input.init();
+  SkillCheck.init((seq, success, great) => {
+    Net.send({ type: 'skill', seq, success, great });
+  });
+
+  // audio needs a user gesture; hook first interaction
+  const startAudio = () => { Sound.start(); Sound.resume(); };
+  window.addEventListener('pointerdown', startAudio, { once: true });
+  window.addEventListener('keydown', startAudio, { once: true });
 
   // ------------------------------------------------------------------
   // boot: name entry -> connect
@@ -56,8 +66,11 @@
     prevState = curState = null;
     clearEntities();
     World3D.buildMap(mapData);
+    Effects.clearAmbience();
+    Effects.buildAmbience(mapData.half || 30);
     Hud.resetFeed();
     Hud.showGame();
+    SkillCheck.dismiss();
   });
 
   Net.on('state', (d) => {
@@ -67,19 +80,34 @@
     stateAt = performance.now();
     syncEntities(d);
     Hud.updateHud(d, myId);
+    handleEvents(d.events);
     Hud.pushEvents(d.events);
+    updateAudioMood(d);
+  });
+
+  Net.on('skill_check', (d) => {
+    // only trigger while actually decoding & alive
+    const me = curState && curState.survivors.find(s => s.id === myId);
+    if (me && me.state === 'alive' && me.decoding >= 0) {
+      SkillCheck.trigger(d.seq, d.window);
+    }
   });
 
   Net.on('match_end', (d) => {
     phase = 'result';
+    SkillCheck.dismiss();
+    Sound.setDanger(0);
+    Sound.setDecoding(false);
     const meName = mySurvivorName();
+    const won = d.result && d.result.outcome === 'survivors_win';
+    Sound.fx[won ? 'win' : 'lose']?.();
     Hud.showResult(d.result, myId, meName);
   });
 
   Net.on('close', () => {
     if (phase === 'running') {
-      // connection lost mid-match; net.js auto-reconnects -> will get wait/lobby
       phase = 'wait';
+      SkillCheck.dismiss();
       Hud.showWait(null);
     }
   });
@@ -88,6 +116,87 @@
     if (!curState) return myName;
     const me = curState.survivors.find(s => s.id === myId);
     return me ? me.name : myName;
+  }
+
+  // ------------------------------------------------------------------
+  // events -> sound / effects (only new ones)
+  // ------------------------------------------------------------------
+  const fxSeen = new Set();
+  function handleEvents(events) {
+    if (!events) return;
+    for (const e of events) {
+      const key = e.t + ':' + e.kind + ':' + (e.who || e.cipher || '');
+      if (fxSeen.has(key)) continue;
+      fxSeen.add(key);
+      const isMe = e.who && e.who === mySurvivorName();
+      switch (e.kind) {
+        case 'cipher_done': {
+          Sound.fx.cipherDone();
+          const spot = mapData && mapData.ciphers[e.cipher];
+          if (spot) Effects.burst(spot[0], 1.4, spot[1], 0xffd76a, 42, 5, 1.1, 0.2);
+          break;
+        }
+        case 'gate_open':
+          Sound.fx.gate();
+          if (mapData) for (const g of mapData.gates) {
+            Effects.burst(g[0], 1.5, g[1], 0x52e0d8, 36, 4.5, 1.2, 0.18);
+          }
+          break;
+        case 'hit': {
+          Sound.fx.hit();
+          if (isMe) { Effects.shake(0.5); Effects.hitFlash(); }
+          const s = findSurvivorByName(e.who);
+          if (s) Effects.burst(s.x, 1.2, s.z, 0xc73535, 24, 3.5, 0.7, 0.15);
+          break;
+        }
+        case 'down': {
+          Sound.fx.down();
+          if (isMe) { Effects.shake(0.8); Effects.hitFlash(); }
+          const s = findSurvivorByName(e.who);
+          if (s) Effects.burst(s.x, 0.8, s.z, 0x8a1020, 34, 4, 1.0, 0.18);
+          break;
+        }
+        case 'rescue': {
+          Sound.fx.rescue();
+          const s = findSurvivorByName(e.who);
+          if (s) Effects.burst(s.x, 1.2, s.z, 0x6fe3a0, 30, 3.5, 0.9, 0.16);
+          break;
+        }
+        case 'escaped':
+          Sound.fx.rescue();
+          break;
+        case 'eliminated':
+          Sound.fx.down();
+          break;
+        case 'skill_miss':
+          if (isMe) Effects.shake(0.3);
+          break;
+      }
+    }
+    if (fxSeen.size > 200) fxSeen.clear();
+  }
+
+  function findSurvivorByName(name) {
+    return curState ? curState.survivors.find(s => s.name === name) : null;
+  }
+
+  // ------------------------------------------------------------------
+  // dynamic audio mood: heartbeat scales with hunter distance
+  // ------------------------------------------------------------------
+  function updateAudioMood(state) {
+    const me = state.survivors.find(s => s.id === myId);
+    if (!me || (me.state !== 'alive' && me.state !== 'down') || !state.hunter) {
+      Sound.setDanger(0);
+      Sound.setDecoding(false);
+      return;
+    }
+    const dx = state.hunter.x - me.x, dz = state.hunter.z - me.z;
+    const d = Math.sqrt(dx * dx + dz * dz);
+    const TERROR = 17.0;
+    Sound.setDanger(Math.max(0, Math.min(1, 1 - d / TERROR)));
+    Sound.setDecoding(me.decoding >= 0);
+    // dismiss QTE if we stopped decoding (hit, moved away...)
+    if (me.decoding < 0 && SkillCheck.isActive()) SkillCheck.dismiss();
   }
 
   // ------------------------------------------------------------------
@@ -105,8 +214,9 @@
         const obj = Characters.buildSurvivor(i);
         obj.position.set(s.x, 0, s.z);
         World3D.scene.add(obj);
-        survivorObjs.set(s.id, { obj, label: makeLabel(s.name, i), moving: false });
-        survivorObjs.get(s.id).obj.add(survivorObjs.get(s.id).label);
+        const label = makeLabel(s.name, i);
+        obj.add(label);
+        survivorObjs.set(s.id, { obj, label, moving: false, wasDecoding: false });
       }
     });
     if (state.hunter && !hunterObj) {
@@ -158,10 +268,16 @@
       e.obj.position.x = x;
       e.obj.position.z = z;
       e.obj.rotation.y = yaw;
-      // hide label for downed/gone; dim for escaped
       const gone = s.state === 'escaped' || s.state === 'eliminated';
       e.obj.visible = !gone;
-      Characters.animateSurvivor(e.obj, e.moving, s.decoding >= 0, s.state === 'down', time);
+      const decoding = s.decoding >= 0;
+      Characters.animateSurvivor(e.obj, e.moving, decoding, s.state === 'down', time);
+      // decode sparks at the cipher the survivor works on
+      if (decoding && mapData) {
+        const spot = mapData.ciphers[s.decoding];
+        if (spot) Effects.decodeSparks(spot[0], 1.35, spot[1], time);
+      }
+      e.wasDecoding = decoding;
     }
 
     if (hunterObj && curState.hunter) {
@@ -187,7 +303,7 @@
   const camPos = new THREE.Vector3(0, 16, 24);
   const camTarget = new THREE.Vector3(0, 0, 0);
 
-  function updateCamera() {
+  function updateCamera(time) {
     const cam = World3D.camera;
     let fx = 0, fz = 0, alive = false;
     if (curState && myId) {
@@ -209,10 +325,11 @@
     camPos.lerp(want, 0.08);
     cam.position.copy(camPos);
     cam.lookAt(camTarget);
+    Effects.applyShake(cam, time);
   }
 
   // ------------------------------------------------------------------
-  // input -> server + decode hint
+  // input -> server + interact hints (decode / rescue)
   // ------------------------------------------------------------------
   function sendInputs() {
     if (phase !== 'running' || !curState || !myId) return;
@@ -220,33 +337,52 @@
     if (!me || me.state !== 'alive') { Net.sendInput(0, 0, false); return; }
 
     const v = Input.moveVector();
-    // screen space -> world: camera looks roughly -z, so up = -z, right = +x
     Net.sendInput(v.x, v.y, Input.isDecoding());
 
-    // decode hint: near an unfinished cipher
-    let near = false;
-    for (const c of curState.ciphers) {
-      if (c.done) continue;
-      const spot = mapData.ciphers[c.idx];
-      const dx = spot[0] - me.x, dz = spot[1] - me.z;
-      if (dx * dx + dz * dz < 2.6 * 2.6) { near = true; break; }
+    // context hint: rescue takes priority over decode
+    let hint = null;
+    for (const s of curState.survivors) {
+      if (s.id !== me.id && s.state === 'down') {
+        const dx = s.x - me.x, dz = s.z - me.z;
+        if (dx * dx + dz * dz < 2.2 * 2.2) {
+          hint = '\u9577\u62bc\u3057 / SPACE \u3067 ' + s.name + ' \u3092\u6551\u52a9';
+          break;
+        }
+      }
     }
-    Hud.setDecodeHint(near && me.decoding < 0);
+    if (!hint && mapData) {
+      for (const c of curState.ciphers) {
+        if (c.done) continue;
+        const spot = mapData.ciphers[c.idx];
+        const dx = spot[0] - me.x, dz = spot[1] - me.z;
+        if (dx * dx + dz * dz < 2.6 * 2.6) {
+          hint = '\u9577\u62bc\u3057 / SPACE \u3067\u89e3\u8aad';
+          break;
+        }
+      }
+    }
+    const busy = me.decoding >= 0 || me.rescuing;
+    Hud.setDecodeHint(!!hint && !busy, hint || '');
   }
 
   // ------------------------------------------------------------------
   // render loop
   // ------------------------------------------------------------------
   let last = performance.now();
+  let lastFrame = performance.now();
   function frame(nowMs) {
     requestAnimationFrame(frame);
     const time = nowMs / 1000;
+    const dt = Math.min(0.05, (nowMs - lastFrame) / 1000);
+    lastFrame = nowMs;
     if (nowMs - last > 33) { sendInputs(); last = nowMs; }
     if (phase === 'running' || phase === 'result') {
       interpolate(time);
-      updateCamera();
+      updateCamera(time);
+      Effects.update(dt, time);
     }
-    World3D.render(time);
+    World3D.render(time, dt);
+    SkillCheck.draw();
   }
   requestAnimationFrame(frame);
 })();
