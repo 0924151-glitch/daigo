@@ -294,7 +294,7 @@ class _GamePanelState extends State<GamePanel> {
             children: [
               Switch(
                 value: (_config['auto_start'] as bool?) ?? true,
-                activeColor: AppColors.dashBlue,
+                activeThumbColor: AppColors.dashBlue,
                 onChanged: _toggleAutoStart,
               ),
               const SizedBox(width: 4),

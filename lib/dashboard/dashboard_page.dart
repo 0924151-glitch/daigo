@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/machine.dart';
 import '../theme/app_theme.dart';
 import 'dashboard_controller.dart';
+import 'game_panel.dart';
 import 'widgets/dialogs.dart';
 import 'widgets/machine_card.dart';
 
@@ -177,6 +178,14 @@ class _DashboardPageState extends State<DashboardPage> {
                       },
                     ),
                   ),
+
+                // ---- 3D game admin panel ----
+                const SliverToBoxAdapter(
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(24, 0, 24, 24),
+                    child: GamePanel(),
+                  ),
+                ),
 
                 // ---- event feed ----
                 if (_ctrl.events.isNotEmpty)
