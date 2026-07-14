@@ -7,6 +7,8 @@ import '../theme/app_theme.dart';
 import 'decoder_controller.dart';
 import 'widgets/atmosphere.dart';
 import 'widgets/cipher_machine.dart';
+import 'widgets/code_rain.dart';
+import 'widgets/holo_hud.dart';
 import 'widgets/overlays.dart';
 import 'widgets/skill_check_widget.dart';
 
@@ -136,6 +138,12 @@ class _DecoderPageState extends State<DecoderPage>
           fit: StackFit.expand,
           children: [
             AtmosphereBackground(intense: _ctrl.holding),
+            CodeRain(intense: _ctrl.holding),
+            HoloHud(
+              progress: _ctrl.progress,
+              holding: _ctrl.holding,
+              completed: _ctrl.completed,
+            ),
 
             // ---- header ----
             SafeArea(
@@ -149,8 +157,8 @@ class _DecoderPageState extends State<DecoderPage>
                       // ornamental divider above title
                       const _OrnamentDivider(width: 200),
                       const SizedBox(height: 10),
-                      Text(
-                        _ctrl.machine?.name ?? '',
+                      GlitchText(
+                        text: _ctrl.machine?.name ?? '',
                         style: TextStyle(
                           fontSize: 32,
                           letterSpacing: 10,
