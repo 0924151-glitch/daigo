@@ -1,5 +1,5 @@
 /* hud.js - DOM UI control: lobby, wait screen, countdown, in-game HUD,
- * event feed, result screen. No game logic. */
+ * event feed, down/rescue banners, result screen. No game logic. */
 'use strict';
 
 const Hud = (() => {
@@ -98,6 +98,9 @@ const Hud = (() => {
       }
     });
 
+    // teammate status strip (Identity V style portraits)
+    updateTeamStrip(state, myId);
+
     // my hp + decode bar + danger vignette
     const me = state.survivors.find(s => s.id === myId);
     if (me) {
@@ -116,17 +119,37 @@ const Hud = (() => {
       let danger = false;
       if (state.hunter && me.state === 'alive') {
         const dx = state.hunter.x - me.x, dz = state.hunter.z - me.z;
-        danger = dx * dx + dz * dz < 12 * 12;
+        danger = dx * dx + dz * dz < 14 * 14;
       }
       $('danger-vignette').classList.toggle('on', danger);
 
-      // downed / escaped banner
-      const banner = $('state-banner');
-      if (me.state === 'down') {
+      updateStateBanner(me);
+    }
+
+    // gate hint
+    $('gate-hint').style.display = state.gate_open ? 'block' : 'none';
+  }
+
+  // ---- downed / escaped / eliminated banner + bleedout ring ----
+  function updateStateBanner(me) {
+    const banner = $('state-banner');
+    const bleed = $('bleedout-wrap');
+    if (me.state === 'down') {
+      banner.style.display = 'block';
+      banner.style.color = 'var(--blood)';
+      if (me.rescue_p > 0) {
+        banner.textContent = `\u4ef2\u9593\u304c\u6551\u52a9\u4e2d\u2026 ${(me.rescue_p * 100 | 0)}%`;
+        banner.style.color = 'var(--cyan)';
+      } else {
         banner.textContent = '\u30c0\u30a6\u30f3\u4e2d\u2026 \u4ef2\u9593\u306e\u6551\u52a9\u3092\u5f85\u3066';
-        banner.style.display = 'block';
-        banner.style.color = 'var(--blood)';
-      } else if (me.state === 'escaped') {
+      }
+      bleed.style.display = 'block';
+      const p = Math.max(0, Math.min(1, me.bleed ?? 0));
+      $('bleedout-bar').style.width = (p * 100) + '%';
+      bleed.classList.toggle('critical', p < 0.3);
+    } else {
+      bleed.style.display = 'none';
+      if (me.state === 'escaped') {
         banner.textContent = '\u8131\u51fa\u6210\u529f\uff01 \u8a66\u5408\u7d42\u4e86\u3092\u898b\u5b88\u3063\u3066\u3044\u307e\u3059';
         banner.style.display = 'block';
         banner.style.color = 'var(--cyan)';
@@ -138,39 +161,73 @@ const Hud = (() => {
         banner.style.display = 'none';
       }
     }
-
-    // gate hint
-    $('gate-hint').style.display = state.gate_open ? 'block' : 'none';
   }
 
-  function setDecodeHint(visible) {
-    $('decode-hint').style.display = visible ? 'block' : 'none';
+  // ---- teammate status strip ----
+  const STATE_ICON = {
+    alive: '\u25cf', down: '\u2716', eliminated: '\u2620',
+    escaped: '\u279a',
+  };
+  function updateTeamStrip(state, myId) {
+    const strip = $('team-strip');
+    if (!strip) return;
+    // build once
+    if (strip.children.length !== state.survivors.length) {
+      strip.innerHTML = '';
+      for (const s of state.survivors) {
+        const d = document.createElement('div');
+        d.className = 'tm';
+        d.dataset.id = s.id;
+        d.innerHTML = `<span class="tm-ic"></span><span class="tm-nm"></span>`;
+        strip.appendChild(d);
+      }
+    }
+    for (const el of strip.children) {
+      const s = state.survivors.find(v => v.id === el.dataset.id);
+      if (!s) continue;
+      el.querySelector('.tm-ic').textContent = STATE_ICON[s.state] || '\u25cf';
+      el.querySelector('.tm-nm').textContent =
+        (s.id === myId ? '\u25b6' : '') + s.name;
+      el.className = 'tm st-' + s.state +
+        (s.decoding >= 0 ? ' decoding' : '') +
+        (s.state === 'down' && s.rescue_p > 0 ? ' rescuing' : '');
+    }
+  }
+
+  function setDecodeHint(visible, text) {
+    const el = $('decode-hint');
+    el.style.display = visible ? 'block' : 'none';
+    if (text) el.querySelector('.hint-text').textContent = text;
   }
 
   // ---- event feed ----
   const seenEvents = new Set();
   const EVENT_TEXT = {
-    cipher_done: (e) => `\u6697\u53f7\u6a5f\u89e3\u8aad\u5b8c\u4e86 (${(e.done ?? '?')}/5)`,
+    cipher_done: (e) => `\u6697\u53f7\u6a5f\u89e3\u8aad\u5b8c\u4e86 (${(e.cipher != null ? e.cipher + 1 : '?')}\u53f7\u6a5f)`,
     gate_open: () => '\u30b2\u30fc\u30c8\u304c\u958b\u3044\u305f\uff01 \u8131\u51fa\u305b\u3088\uff01',
-    hit: (e) => `${e.name} \u304c\u653b\u6483\u3092\u53d7\u3051\u305f`,
-    down: (e) => `${e.name} \u304c\u30c0\u30a6\u30f3\u3057\u305f`,
-    rescue: (e) => `${e.name} \u304c\u6551\u52a9\u3055\u308c\u305f`,
-    escape: (e) => `${e.name} \u304c\u8131\u51fa\u3057\u305f\uff01`,
-    eliminated: (e) => `${e.name} \u304c\u8131\u843d\u3057\u305f`,
+    hit: (e) => `${e.who} \u304c\u653b\u6483\u3092\u53d7\u3051\u305f`,
+    down: (e) => `${e.who} \u304c\u30c0\u30a6\u30f3\u3057\u305f`,
+    rescue: (e) => `${e.by} \u304c ${e.who} \u3092\u6551\u52a9\u3057\u305f\uff01`,
+    escaped: (e) => `${e.who} \u304c\u8131\u51fa\u3057\u305f\uff01`,
+    eliminated: (e) => `${e.who} \u304c\u8131\u843d\u3057\u305f`,
+    skill_miss: (e) => `${e.who} \u304c\u89e3\u8aad\u3092\u30df\u30b9\u3057\u305f\uff01`,
   };
-  const DANGER_KINDS = new Set(['hit', 'down', 'eliminated']);
+  const DANGER_KINDS = new Set(['hit', 'down', 'eliminated', 'skill_miss']);
+  const GOOD_KINDS = new Set(['rescue', 'escaped', 'cipher_done', 'gate_open']);
 
   function pushEvents(events) {
     if (!events) return;
     const feed = $('event-feed');
     for (const e of events) {
-      const key = e.t + ':' + e.kind + ':' + (e.name || '');
+      const key = e.t + ':' + e.kind + ':' + (e.who || e.cipher || '');
       if (seenEvents.has(key)) continue;
       seenEvents.add(key);
       const fn = EVENT_TEXT[e.kind];
       if (!fn) continue;
       const div = document.createElement('div');
-      div.className = 'event-item' + (DANGER_KINDS.has(e.kind) ? ' danger' : '');
+      div.className = 'event-item'
+        + (DANGER_KINDS.has(e.kind) ? ' danger' : '')
+        + (GOOD_KINDS.has(e.kind) ? ' good' : '');
       div.textContent = fn(e);
       feed.prepend(div);
       setTimeout(() => div.remove(), 6000);
@@ -209,9 +266,10 @@ const Hud = (() => {
       const tr = document.createElement('tr');
       const me = s.name === mySurvivorName;
       tr.innerHTML =
-        `<td>${me ? '\u25b6 ' : ''}${escapeHtml(s.name)}</td>` +
+        `<td>${me ? '\u25b6 ' : ''}${escapeHtml(s.name)}${s.bot ? ' <span class="bot-tag">CPU</span>' : ''}</td>` +
         `<td class="st-${s.state}">${STATE_TEXT[s.state] || s.state}</td>` +
-        `<td>\u89e3\u8aad ${s.decoded}</td>`;
+        `<td>\u89e3\u8aad ${s.decoded}</td>` +
+        `<td>\u6551\u52a9 ${s.rescues ?? 0}</td>`;
       tbody.appendChild(tr);
     }
     $('result-ciphers').textContent =
