@@ -19,7 +19,7 @@ class Survivor:
         self.x, self.z = spawn
         self.yaw = 0.0            # facing (rad), for renderer
         self.hp = cfg.SURVIVOR_HP
-        self.state = "alive"      # alive | downed | eliminated | escaped
+        self.state = "alive"      # alive | down | eliminated | escaped
         self.decoding_cipher = -1 # index of cipher being decoded, -1 none
         self.speed_boost_until = 0.0
         self.last_input = now()
@@ -27,12 +27,22 @@ class Survivor:
         self.in_x = 0.0
         self.in_z = 0.0
         self.in_decode = False
+        # down / rescue
+        self.bleedout_at = 0.0    # when downed: time of elimination
+        self.rescue_progress = 0.0  # 0..1 while being rescued
+        self.rescuing_id = None   # id of downed ally I'm rescuing
+        # skill check QTE
+        self.skill_at = 0.0       # when next skill check may fire
+        self.skill_active = False # a check is pending on the client
+        self.skill_deadline = 0.0
+        self.skill_seq = 0        # increments per issued check
         # bot brain scratch data
         self.bot_target = None    # (x, z) waypoint
         self.bot_cipher = -1
         self.bot_repath_at = 0.0
         # stats
         self.decoded_amount = 0.0
+        self.rescues = 0
 
     @property
     def speed(self) -> float:
@@ -42,15 +52,26 @@ class Survivor:
         return s
 
     def hit(self):
+        """Take one hit. 0 hp -> downed (bleeding out), not instant death."""
         self.hp -= 1
         self.decoding_cipher = -1
+        self.skill_active = False
         if self.hp <= 0:
-            self.state = "eliminated"
+            self.state = "down"
+            self.bleedout_at = now() + cfg.DOWN_BLEEDOUT_SEC
+            self.rescue_progress = 0.0
         else:
             self.speed_boost_until = now() + cfg.HIT_BOOST_SEC
 
+    def rescued(self):
+        """Picked back up by an ally."""
+        self.state = "alive"
+        self.hp = cfg.RESCUED_HP
+        self.rescue_progress = 0.0
+        self.speed_boost_until = now() + cfg.HIT_BOOST_SEC
+
     def snapshot(self) -> dict:
-        return {
+        d = {
             "id": self.id,
             "name": self.name,
             "bot": self.is_bot,
@@ -61,7 +82,13 @@ class Survivor:
             "state": self.state,
             "decoding": self.decoding_cipher,
             "boost": now() < self.speed_boost_until,
+            "rescuing": self.rescuing_id,
         }
+        if self.state == "down":
+            d["bleed"] = max(0.0, round(
+                (self.bleedout_at - now()) / cfg.DOWN_BLEEDOUT_SEC, 3))
+            d["rescue_p"] = round(self.rescue_progress, 3)
+        return d
 
 
 class Hunter:
