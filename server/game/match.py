@@ -177,31 +177,60 @@ class Match:
                     s.yaw = math.atan2(nx - s.x, nz - s.z)
                 s.x, s.z = nx, nz
                 s.decoding_cipher = -1
+                s.rescuing_id = None
+                self._cancel_skill(s)
             elif s.in_decode:
-                c = self._nearest_cipher(s)
-                if c is not None:
-                    s.decoding_cipher = c.idx
-                    amt = (100.0 / cfg.DECODE_TIME_SEC) * dt
-                    before_done = c.done
-                    c.add(amt)
-                    s.decoded_amount += amt
-                    if c.done and not before_done:
-                        self._event("cipher_done", cipher=c.idx)
-                else:
+                # interact: rescue a downed ally takes priority over decoding
+                victim = self._nearest_downed(s)
+                if victim is not None:
                     s.decoding_cipher = -1
+                    s.rescuing_id = victim.id
+                    self._cancel_skill(s)
+                else:
+                    s.rescuing_id = None
+                    c = self._nearest_cipher(s)
+                    if c is not None:
+                        was_decoding = s.decoding_cipher == c.idx
+                        s.decoding_cipher = c.idx
+                        if not was_decoding:
+                            self._schedule_skill(s)
+                        amt = (100.0 / cfg.DECODE_TIME_SEC) * dt
+                        before_done = c.done
+                        c.add(amt)
+                        s.decoded_amount += amt
+                        if c.done and not before_done:
+                            self._event("cipher_done", cipher=c.idx)
+                            self._cancel_skill(s)
+                        else:
+                            self._tick_skill(s, c)
+                    else:
+                        s.decoding_cipher = -1
+                        self._cancel_skill(s)
             else:
                 s.decoding_cipher = -1
+                s.rescuing_id = None
+                self._cancel_skill(s)
 
         # bots
         for s in self.survivors:
             if s.is_bot:
-                ai.tick_bot(s, self.hunter, self.ciphers, dt)
+                ai.tick_bot(s, self.hunter, self.ciphers, dt,
+                            survivors=self.survivors)
+
+        # rescues (humans + bots advance progress on their victim)
+        self._tick_rescues(dt)
+
+        # bleedout of downed survivors
+        for s in self.survivors:
+            if s.state == "down" and now() >= s.bleedout_at:
+                s.state = "eliminated"
+                self._event("eliminated", who=s.name)
 
         # hunter
         hits = ai.tick_hunter(self.hunter, self.survivors, self.ciphers, dt)
         for sid in hits:
             s = self._survivor(sid)
-            kind = "eliminated" if s.state == "eliminated" else "hit"
+            kind = "down" if s.state == "down" else "hit"
             self._event(kind, who=s.name)
 
         # gates
@@ -217,6 +246,102 @@ class Match:
                         s.state = "escaped"
                         self._event("escaped", who=s.name)
                         break
+
+    # ---- rescue helpers ----
+    def _nearest_downed(self, s):
+        best, bd = None, cfg.RESCUE_RADIUS
+        for o in self.survivors:
+            if o.id == s.id or o.state != "down":
+                continue
+            d = world.dist(s.x, s.z, o.x, o.z)
+            if d <= bd:
+                best, bd = o, d
+        return best
+
+    def _tick_rescues(self, dt: float):
+        """Advance rescue progress for every downed survivor with a rescuer
+        in range; complete at 1.0."""
+        rescuers = {}   # victim_id -> rescuer
+        for s in self.survivors:
+            if s.state == "alive" and s.rescuing_id:
+                victim = self._survivor(s.rescuing_id)
+                if victim is None or victim.state != "down" or \
+                        world.dist(s.x, s.z, victim.x, victim.z) > cfg.RESCUE_RADIUS + 0.4:
+                    s.rescuing_id = None
+                    continue
+                rescuers[victim.id] = s
+        for s in self.survivors:
+            if s.state != "down":
+                continue
+            r = rescuers.get(s.id)
+            if r is not None:
+                s.rescue_progress = min(1.0, s.rescue_progress +
+                                        dt / cfg.RESCUE_TIME_SEC)
+                if s.rescue_progress >= 1.0:
+                    s.rescued()
+                    r.rescuing_id = None
+                    r.rescues += 1
+                    self._event("rescue", who=s.name, by=r.name)
+            else:
+                s.rescue_progress = max(0.0, s.rescue_progress -
+                                        dt / cfg.RESCUE_TIME_SEC * 0.7)
+
+    # ---- skill check helpers (humans only) ----
+    def _schedule_skill(self, s):
+        s.skill_active = False
+        s.skill_at = now() + random.uniform(cfg.SKILL_MIN_GAP_SEC,
+                                            cfg.SKILL_MAX_GAP_SEC)
+
+    def _cancel_skill(self, s):
+        if s.skill_active:
+            s.skill_active = False
+
+    def _tick_skill(self, s, cipher):
+        t = now()
+        if s.skill_active:
+            if t >= s.skill_deadline:      # timed out -> miss
+                self._skill_result(s, cipher, False, timeout=True)
+            return
+        if t >= s.skill_at:
+            s.skill_active = True
+            s.skill_seq += 1
+            s.skill_deadline = t + cfg.SKILL_WINDOW_SEC
+            p = self._player_of(s)
+            if p:
+                asyncio.ensure_future(p.send({
+                    "type": "skill_check", "seq": s.skill_seq,
+                    "window": cfg.SKILL_WINDOW_SEC,
+                }))
+
+    def _skill_result(self, s, cipher, success: bool,
+                      great: bool = False, timeout: bool = False):
+        s.skill_active = False
+        s.skill_at = now() + random.uniform(cfg.SKILL_MIN_GAP_SEC,
+                                            cfg.SKILL_MAX_GAP_SEC)
+        if cipher is None:
+            return
+        if success:
+            if great:
+                cipher.add(cfg.SKILL_GREAT_BONUS)
+                s.decoded_amount += cfg.SKILL_GREAT_BONUS
+        else:
+            cipher.progress = max(0.0, cipher.progress - cfg.SKILL_MISS_PENALTY)
+            self._event("skill_miss", who=s.name)
+
+    def handle_skill_reply(self, survivor_id, seq: int,
+                           success: bool, great: bool):
+        s = self._survivor(survivor_id)
+        if s is None or not s.skill_active or seq != s.skill_seq:
+            return
+        c = self.ciphers[s.decoding_cipher] \
+            if 0 <= s.decoding_cipher < len(self.ciphers) else None
+        self._skill_result(s, c, success, great)
+
+    def _player_of(self, s):
+        for p in self.players.values():
+            if p.survivor_id == s.id:
+                return p
+        return None
 
     def _nearest_cipher(self, s):
         best, bd = None, cfg.DECODE_RADIUS
@@ -246,7 +371,8 @@ class Match:
         if now() >= self.match_end_at:
             self.result = self._make_result("time_up")
             return True
-        active = [s for s in self.survivors if s.state == "alive"]
+        active = [s for s in self.survivors
+                  if s.state in ("alive", "down")]
         if not active:
             escaped = sum(1 for s in self.survivors if s.state == "escaped")
             self.result = self._make_result(
@@ -260,7 +386,8 @@ class Match:
             "match_no": self.match_no,
             "survivors": [
                 {"name": s.name, "bot": s.is_bot, "state": s.state,
-                 "decoded": round(s.decoded_amount, 1)}
+                 "decoded": round(s.decoded_amount, 1),
+                 "rescues": s.rescues}
                 for s in self.survivors
             ],
             "ciphers_done": sum(1 for c in self.ciphers if c.done),
