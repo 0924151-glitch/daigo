@@ -251,3 +251,127 @@ body.touch #joystick, body.touch #btn-decode { display: block; }
   background: rgba(6,6,10,.5); border-radius: 3px;
 }
 .back-link:hover { color: var(--cyan); border-color: rgba(82,224,216,.4); }
+
+/* ---------- cinematic letterbox ---------- */
+.letterbox {
+  position: fixed; left: 0; right: 0; height: 3.2vh; max-height: 34px;
+  background: linear-gradient(180deg, rgba(0,0,0,.92), rgba(0,0,0,.75));
+  z-index: 18; pointer-events: none;
+}
+.letterbox.top { top: 0; }
+.letterbox.bottom { bottom: 0;
+  background: linear-gradient(0deg, rgba(0,0,0,.92), rgba(0,0,0,.75)); }
+
+/* ---------- how-to (name entry) ---------- */
+.howto { margin-top: 22px; text-align: left; }
+.howto-row { font-size: 12px; letter-spacing: .1em; opacity: .7;
+  padding: 4px 0; }
+.howto .key {
+  display: inline-block; min-width: 120px; text-align: center;
+  border: 1px solid rgba(82,224,216,.3); border-radius: 2px;
+  padding: 2px 8px; margin-right: 10px; color: var(--cyan); font-size: 11px;
+}
+
+/* ---------- teammate strip ---------- */
+#team-strip {
+  position: absolute; top: 50%; left: 18px; transform: translateY(-50%);
+  display: flex; flex-direction: column; gap: 8px;
+}
+.tm {
+  display: flex; align-items: center; gap: 8px;
+  background: rgba(6,6,10,.6);
+  border-left: 2px solid rgba(216,211,196,.3);
+  padding: 5px 12px 5px 8px;
+  font-size: 12px; letter-spacing: .08em;
+  border-radius: 0 3px 3px 0;
+  backdrop-filter: blur(4px);
+  transition: border-color .3s, opacity .3s;
+}
+.tm-ic { font-size: 11px; width: 14px; text-align: center; }
+.tm.st-alive { border-left-color: var(--cyan); }
+.tm.st-alive .tm-ic { color: var(--cyan); }
+.tm.st-down { border-left-color: var(--blood); animation: pulse-red 1.2s infinite; }
+.tm.st-down .tm-ic { color: var(--blood); }
+.tm.st-eliminated { opacity: .35; border-left-color: #555; }
+.tm.st-escaped { border-left-color: var(--amber); }
+.tm.st-escaped .tm-ic { color: var(--amber); }
+.tm.decoding::after { content: '\29D7'; color: var(--cyan); font-size: 11px;
+  animation: spin 2s linear infinite; }
+.tm.rescuing { border-left-color: #6fe3a0; }
+@keyframes pulse-red {
+  0%, 100% { box-shadow: 0 0 0 rgba(163,39,58,0); }
+  50% { box-shadow: 0 0 14px rgba(163,39,58,.6); }
+}
+
+/* ---------- state banner ---------- */
+#state-banner {
+  position: absolute; top: 20%; left: 50%; transform: translateX(-50%);
+  font-size: 20px; letter-spacing: .25em;
+  background: rgba(6,6,10,.7); padding: 12px 34px;
+  border-top: 1px solid rgba(216,211,196,.2);
+  border-bottom: 1px solid rgba(216,211,196,.2);
+  text-shadow: 0 0 14px currentColor;
+  animation: bannerIn .5s ease-out;
+}
+@keyframes bannerIn { from { opacity: 0; transform: translate(-50%, -12px); } }
+
+/* ---------- gate hint ---------- */
+#gate-hint {
+  position: absolute; top: 68px; left: 50%; transform: translateX(-50%);
+  font-size: 15px; letter-spacing: .25em; color: var(--amber);
+  background: rgba(6,6,10,.65); padding: 8px 24px;
+  border: 1px solid rgba(232,163,61,.4); border-radius: 3px;
+  animation: gatePulse 1.4s infinite;
+}
+@keyframes gatePulse {
+  0%, 100% { box-shadow: 0 0 6px rgba(232,163,61,.2); }
+  50% { box-shadow: 0 0 22px rgba(232,163,61,.6); }
+}
+
+/* ---------- bleedout bar ---------- */
+#bleedout-wrap {
+  position: absolute; bottom: 130px; left: 50%; transform: translateX(-50%);
+  width: 260px; text-align: center;
+}
+.bleedout-label { font-size: 11px; letter-spacing: .4em; color: var(--blood);
+  margin-bottom: 6px; }
+.bleedout-track {
+  height: 8px; background: rgba(255,255,255,.06);
+  border: 1px solid rgba(163,39,58,.5);
+}
+#bleedout-bar { height: 100%; width: 100%;
+  background: linear-gradient(90deg, #7a1020, var(--blood));
+  box-shadow: 0 0 10px rgba(163,39,58,.6);
+  transition: width .3s linear; }
+#bleedout-wrap.critical #bleedout-bar { animation: bleedFlash .5s infinite; }
+@keyframes bleedFlash { 50% { opacity: .4; } }
+
+/* ---------- skill check QTE ---------- */
+#skill-canvas {
+  position: absolute; top: 50%; left: 50%;
+  width: 260px; height: 260px;
+  transform: translate(-50%, -58%) scale(.7);
+  opacity: 0; pointer-events: none;
+  transition: opacity .18s, transform .18s;
+  z-index: 26;
+}
+#skill-canvas.on {
+  opacity: 1; pointer-events: auto;
+  transform: translate(-50%, -58%) scale(1);
+}
+
+/* ---------- event feed: good events ---------- */
+.event-item.good { border-right-color: var(--cyan); color: #b9f3ef; }
+
+/* ---------- result extras ---------- */
+.result-table .st-down { color: var(--amber); }
+.result-table .st-alive { color: var(--cyan); }
+.bot-tag {
+  font-size: 10px; letter-spacing: .1em; color: rgba(216,211,196,.45);
+  border: 1px solid rgba(216,211,196,.25); border-radius: 2px;
+  padding: 1px 5px; margin-left: 6px; vertical-align: middle;
+}
+.result-outcome { animation: outcomeIn .8s cubic-bezier(.2,.9,.3,1.2); }
+@keyframes outcomeIn {
+  from { opacity: 0; letter-spacing: .8em; transform: scale(1.15); }
+}
