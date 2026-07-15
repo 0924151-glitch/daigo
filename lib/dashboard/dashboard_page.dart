@@ -34,14 +34,22 @@ class _DashboardPageState extends State<DashboardPage> {
   Future<void> _addMachine() async {
     final result = await showMachineFormDialog(context);
     if (result == null) return;
-    await _ctrl.createMachine(result.name, result.durationSec);
+    await _ctrl.createMachine(
+      result.name,
+      result.durationSec,
+      design: result.design,
+    );
   }
 
   Future<void> _editMachine(Machine m) async {
     final result = await showMachineFormDialog(context, existing: m);
     if (result == null) return;
-    await _ctrl.updateMachine(m.id,
-        name: result.name, durationSec: result.durationSec);
+    await _ctrl.updateMachine(
+      m.id,
+      name: result.name,
+      durationSec: result.durationSec,
+      design: result.design,
+    );
   }
 
   Future<void> _deleteMachine(Machine m) async {
