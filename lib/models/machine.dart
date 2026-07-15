@@ -3,6 +3,10 @@ class Machine {
   final String id;
   final String name;
   final int durationSec;
+
+  /// Visual design key: classic / mahogany / military / brass / noir.
+  /// See lib/decoder/widgets/machine_designs.dart for definitions.
+  final String design;
   final double progress; // 0-100
   final String status; // idle / decoding / paused / completed
   final bool connected;
@@ -17,6 +21,7 @@ class Machine {
     required this.id,
     required this.name,
     required this.durationSec,
+    required this.design,
     required this.progress,
     required this.status,
     required this.connected,
@@ -33,6 +38,7 @@ class Machine {
       id: json['id'] as String,
       name: (json['name'] as String?) ?? '暗号機',
       durationSec: (json['duration_sec'] as num?)?.toInt() ?? 60,
+      design: (json['design'] as String?) ?? 'classic',
       progress: (json['progress'] as num?)?.toDouble() ?? 0.0,
       status: (json['status'] as String?) ?? 'idle',
       connected: (json['connected'] as bool?) ?? false,
@@ -51,6 +57,7 @@ class Machine {
   Machine copyWith({
     String? name,
     int? durationSec,
+    String? design,
     double? progress,
     String? status,
   }) {
@@ -58,6 +65,7 @@ class Machine {
       id: id,
       name: name ?? this.name,
       durationSec: durationSec ?? this.durationSec,
+      design: design ?? this.design,
       progress: progress ?? this.progress,
       status: status ?? this.status,
       connected: connected,
