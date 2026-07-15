@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../../decoder/widgets/machine_designs.dart';
 import '../../models/machine.dart';
 import '../../theme/app_theme.dart';
+import 'dialogs.dart' show MachineThumbnailPainter;
 
 /// Minimal, Google-style card showing one machine's live status with
 /// smooth animated progress.
@@ -52,6 +54,17 @@ class MachineCard extends StatelessWidget {
               // ---- header row ----
               Row(
                 children: [
+                  // machine design thumbnail
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: CustomPaint(
+                      size: const Size(36, 36),
+                      painter: MachineThumbnailPainter(
+                        design: machineDesignByKey(machine.design),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
                   _ConnectionDot(connected: machine.connected),
                   const SizedBox(width: 8),
                   Expanded(
@@ -87,14 +100,13 @@ class MachineCard extends StatelessWidget {
                     ),
                   ),
                   const Spacer(),
-                  if (machine.skillMiss > 0)
-                    Text(
-                      'ミス ${machine.skillMiss}',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: AppColors.dashRed,
-                      ),
+                  Text(
+                    machineDesignByKey(machine.design).label,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: AppColors.dashGrey,
                     ),
+                  ),
                 ],
               ),
               const SizedBox(height: 18),
