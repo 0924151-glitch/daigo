@@ -61,11 +61,13 @@ async def broadcast_event(ev: dict):
 class MachineCreate(BaseModel):
     name: str = ""
     duration_sec: int = 60
+    design: str = "classic"
 
 
 class MachineUpdate(BaseModel):
     name: str | None = None
     duration_sec: int | None = None
+    design: str | None = None
 
 
 # ---------- REST endpoints ----------
@@ -82,7 +84,7 @@ async def list_machines():
 
 @app.post("/api/machines")
 async def create_machine(body: MachineCreate):
-    m = store.create(body.name, body.duration_sec)
+    m = store.create(body.name, body.duration_sec, body.design)
     store.add_event(m["id"], "created", f"{m['name']} を設置しました")
     await broadcast_state()
     return machine_public(m)
@@ -98,7 +100,7 @@ async def get_machine(machine_id: str):
 
 @app.patch("/api/machines/{machine_id}")
 async def update_machine(machine_id: str, body: MachineUpdate):
-    m = store.update_settings(machine_id, body.name, body.duration_sec)
+    m = store.update_settings(machine_id, body.name, body.duration_sec, body.design)
     if not m:
         raise HTTPException(404, "machine not found")
     # notify the live machine page of new settings
